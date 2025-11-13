@@ -27,6 +27,7 @@ data/dataset_2/
 
 # --- Datasets generados por el script de parches ---
 datasets/
+results/
 
 # --- Modelos entrenados y artefactos grandes ---
 *.pt          # Pesos de PyTorch
