@@ -1,0 +1,48 @@
+# --- Python básico ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Archivos de entorno
+.env
+*.env
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+
+# # --- Datos pesados de entrada (no versionar) ---
+# # Imágenes originales y CSV de anotaciones
+# data/imagenes/
+# data/csvs/
+
+# Otros datasets antiguos si no los quieres en el repo
+data/dataset/
+data/dataset_2/
+
+# --- Datasets generados por el script de parches ---
+datasets/
+
+# --- Modelos entrenados y artefactos grandes ---
+*.pt          # Pesos de PyTorch
+*.pth
+*.onnx
+*.h5
+
+# Zips u otros paquetes grandes
+*.zip
+
+# Métricas y reportes generados (opcional)
+metrics.csv
+test_report.txt
+
+# Archivos temporales / sistema
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp

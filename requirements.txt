@@ -1,0 +1,8 @@
+pandas
+pillow
+openpyxl
+torch
+torchvision
+scikit-learn
+plotly
+matplotlib
