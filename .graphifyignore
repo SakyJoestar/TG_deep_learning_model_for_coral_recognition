@@ -1,0 +1,23 @@
+# .graphifyignore — controla qué ve el knowledge graph de graphify.
+# Usa la misma sintaxis que .gitignore (globs, /, !negación). graphify ya lee
+# .gitignore automáticamente, así que esto solo AÑADE exclusiones extra
+# (nunca puede reincluir algo que .gitignore ya excluye).
+
+# --- Datos crudos (miles de CSV/imágenes, sin relaciones útiles para el grafo) ---
+data/csvs/
+data/imagenes/
+
+# --- Salidas de entrenamiento / resultados generados ---
+results_cnn/
+results_finetune/
+results_miniresnet/
+
+# --- Paquetes grandes ---
+Compartir_corales.zip
+
+# --- Salida del propio graphify (evita que se indexe a sí mismo) ---
+graphify-out/
+
+# --- Checkpoints sueltos fuera de las carpetas de resultados ---
+*.ckpt
+checkpoints/

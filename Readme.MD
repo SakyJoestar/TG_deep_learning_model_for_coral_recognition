@@ -20,11 +20,11 @@ python scripts/batch_crop_and_label_from_excel.py \
   --images_dir "./data/imagenes" \
   --excels_dir "./data/csvs" \
   --out_dir "./datasets" \
-  --patch_size 32 \
+  --patch_size 224 \
   --val_ratio 0.15 \
   --test_ratio 0.15 \
   --seed 42 \
-  --debug true
+  --debug false
 ```
 
 ## Correr percepton multicapa
@@ -32,7 +32,7 @@ python scripts/batch_crop_and_label_from_excel.py \
 
 python scripts/train_mlp_patches.py \
   --data_dir ./datasets/32x32 \
-  --patch_size 32 \
+  --patch_size 224 \
   --epochs 25 \
   --batch_size 64 \
   --lr 1e-3 \
@@ -44,7 +44,7 @@ python scripts/train_mlp_patches.py \
 ```bash
 python scripts/train_cnn_patches.py \
   --data_dir ./datasets/32x32 \
-  --patch_size 32 \
+  --patch_size 224 \
   --epochs 40 \
   --batch_size 32 \
   --lr 3e-4 \
@@ -53,40 +53,57 @@ python scripts/train_cnn_patches.py \
 
 ## Fine-tuning de modelo resnet18
 ```bash
-python train_finetune.py \
-  --data_dir ./datasets/32x32 \
+python scripts/train_finetune.py \
+  --data_dir ./datasets/224x224 \
   --model resnet18 \
-  --epochs 20 \
+  --freeze_level 0 \
+  --epochs 10 \
   --batch_size 32 \
   --lr 1e-4
 ```
 
 ## Fine-tuning de modelo vgg16 
 ```bash
-python train_finetune.py \
-  --data_dir ./datasets/32x32 \
+python scripts/train_finetune.py \
+  --data_dir ./datasets/224x224 \
   --model vgg16  \
-  --epochs 20 \
+  --freeze_level 0 \
+  --epochs 10 \
   --batch_size 32 \
   --lr 1e-4
 ```
 
 ## Fine-tuning de modelo AlexNet
 ```bash
-python train_finetune.py \
-  --data_dir ./datasets/32x32 \
-  --model AlexNet \
-  --epochs 20 \
+python scripts/train_finetune.py \
+  --data_dir ./datasets/224x224 \
+  --model alexnet \
+  --freeze_level 0 \
+  --epochs 10 \
   --batch_size 32 \
   --lr 1e-4
 ```
 
 ## Fine-tuning de modelo MobileNetV2
 ```bash
-python train_finetune.py \
-  --data_dir ./datasets/32x32 \
-  --model MobileNetV2 \
-  --epochs 20 \
+python scripts/train_finetune.py \
+  --data_dir ./datasets/224x224 \
+  --model mobilenet_v2 \
+  --freeze_level 0 \
+  --epochs 10 \
   --batch_size 32 \
   --lr 1e-4
+```
+## train_miniresnet_patches.py
+```bash
+python scripts/train_miniresnet_patches.py \
+    --data_dir ./datasets/224x224 \
+    --patch_size 32 \
+    --epochs 40 \
+    --batch_size 32 \
+    --lr 3e-4 \
+    --dropout 0.3 \
+    --num_workers 4 \
+    --patience 10 \
+    --results_dir results_miniresnet
 ```

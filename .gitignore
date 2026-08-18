@@ -22,8 +22,7 @@ venv/
 # data/csvs/
 
 # Otros datasets antiguos si no los quieres en el repo
-data/dataset/
-data/dataset_2/
+data/
 
 # --- Datasets generados por el script de parches ---
 datasets/
@@ -47,3 +46,23 @@ test_report.txt
 Thumbs.db
 *.swp
 *.tmp
+
+# --- Claude Code / Graphify ---
+# Configuración local con posibles rutas/tokens específicos de tu máquina
+.claude/settings.local.json
+
+# Historial y sesiones locales de Claude Code (si aplica)
+.claude/history/
+
+# --- Graphify: sube el contexto útil, ignora lo pesado/regenerable ---
+graphify-out/*
+!graphify-out/graph.json
+!graphify-out/GRAPH_REPORT.md
+
+# Logs generados durante ejecución (Claude Code o scripts)
+*.log
+logs/
+
+# API keys sueltas en caso de que las guardes en archivo aparte
+**/api_key*
+**/*_key.txt

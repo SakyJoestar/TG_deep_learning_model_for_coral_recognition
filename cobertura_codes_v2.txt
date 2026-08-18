@@ -1,0 +1,47 @@
+DFDFDF
+AFAFAF
+8
+"ALG", "Algas",80FF80
+"CORAL", "Coral",00FFFF
+"CORBLAN", "Corales blandos",FF80FF
+"SPON", "Esponjas",FF8000
+"OTROS", "Otros organismos",8000FF
+"SINERTE", "Sustrato inerte",804000
+"NA", "NA",408080
+"TAPE", "Tape",DFDFDF
+"EALG", "Calc�reas incrustantes", "ALG"
+"TALG", "Tapetes (frondosa o filamentosa, <1cm)", "ALG"
+"FALG", "Frondosas, macroalgas (>1 cm)", "ALG"
+"CALG", "Calc�reas erectas", "ALG"
+"PCLA", "Pavona clavus", "CORAL"
+"GPLA", "Gardineroseris planulata", "CORAL"
+"PGIG", "Pavona gigantea", "CORAL"
+"PORSP", "Porites spp.", "CORAL"
+"PGRA", "Pocillopora grandis", "CORAL"
+"PVAR", "Pavona varians", "CORAL"
+"PMAL", "Pavona maldivensis", "CORAL"
+"PFRO", "Pavona frondifera", "CORAL"
+"PCHI", "Pavona chiriquiensis", "CORAL"
+"PSTE", "Psammocora stellata", "CORAL"
+"POCSP", "Pocillopora spp.", "CORAL"
+"ENGR", "Gorgon�ceos incrustantes", "CORBLAN"
+"CMOR", "Coralimorfarios", "CORBLAN"
+"ZOAN", "Zoantidios", "CORBLAN"
+"ANEM", "An�monas", "CORBLAN"
+"GORG", "Gorgon�ceos erectos", "CORBLAN"
+"ERSP", "Erectas", "SPON"
+"OTROS", "Asicdias, poliquetos, briozoos, foramin�feros", "OTROS"
+"ENSP", "Incrustantes", "SPON"
+"GAPS", "Huecos", "SINERTE"
+"ROCK", "Roca", "SINERTE"
+"BOUL", "Cantos", "SINERTE"
+"RUBB", "Cascajos (rubbe), escombros", "SINERTE"
+"SAND", "Sedimento libre", "SINERTE"
+"NA", "NA", "NA"
+"TAPE", "Tape", "TAPE"
+NOTES,NOTES,NOTES
+"DCOR", "Coral reci�n muerto", "NA"
+"OTRO", "Otro", "NA"
+"ENFER", "Coral enfermo", "NA"
+"BLANQ", "Coral blanqueado", "NA"
+"SANO", "Coral sano", "NA"

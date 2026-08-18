@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-train_mlp_patches.py
-Entrena un MLP (perceptrón multicapa) sobre parches NxN organizados en ImageFolder.
-Genera curvas de accuracy y loss por época (train/val/test), matriz de confusión
-y guarda PNGs en la carpeta ./results.
+"""train_mlp_patches.py.
+
+Entrena un :class:`MLP` (perceptrón multicapa) sobre parches NxN
+organizados en estructura ``ImageFolder``, aplanando cada imagen a un
+vector de ``3 * patch_size * patch_size`` valores. Sirve como línea base
+sencilla frente a los modelos convolucionales (:mod:`train_cnn_patches`,
+:mod:`train_miniresnet_patches`).
+
+Genera curvas de accuracy, F1 macro y loss por época (train/val/test),
+matriz de confusión y guarda todo (PNGs, CSV de métricas, reporte de test
+y mejor checkpoint) en la carpeta ``./results``.
+
+Uso típico:
+    python scripts/train_mlp_patches.py --data_dir ./datasets/32x32 --hidden 1024,512
 """
 
 import os, json, argparse
@@ -17,18 +26,42 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, f1_score
 import matplotlib.pyplot as plt
 
 
 def parse_hidden(s):
+    """Convierte la cadena ``--hidden`` (p.ej. ``"1024,512"``) en una lista de tamaños de capa.
+
+    Args:
+        s: Cadena con los tamaños de las capas ocultas separados por comas.
+            Si está vacía o es ``None``, se usa ``[1024, 512]`` por defecto.
+
+    Returns:
+        list[int]: Tamaños de las capas ocultas, en orden.
+    """
     if not s:
         return [1024, 512]
     return [int(x) for x in s.split(",") if x.strip()]
 
 
 class MLP(nn.Module):
+    """Perceptrón multicapa simple: bloques Linear -> ReLU -> Dropout apilados.
+
+    La entrada esperada es un vector plano (imagen aplanada), y la salida
+    son los logits de clasificación.
+    """
     def __init__(self, input_dim, num_classes, hidden, dropout=0.3):
+        """Construye las capas ocultas y la capa de salida del MLP.
+
+        Args:
+            input_dim: Dimensión del vector de entrada (p.ej.
+                ``3 * patch_size * patch_size`` para una imagen RGB aplanada).
+            num_classes: Número de clases de salida.
+            hidden: Lista con el tamaño de cada capa oculta, en orden
+                (ver :func:`parse_hidden`).
+            dropout: Probabilidad de dropout aplicada tras cada capa oculta.
+        """
         super().__init__()
         layers = []
         prev = input_dim
@@ -39,10 +72,38 @@ class MLP(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
+        """Propaga el batch de entrada a través del MLP.
+
+        Args:
+            x (torch.Tensor): Batch de vectores aplanados, forma ``(N, input_dim)``.
+
+        Returns:
+            torch.Tensor: Logits sin normalizar, de forma ``(N, num_classes)``.
+        """
         return self.net(x)
 
 
 def make_loaders(data_dir, patch_size=32, batch_size=64, num_workers=2):
+    """Crea los ``DataLoader`` de train/val/test a partir de una estructura ``ImageFolder``.
+
+    A diferencia de los scripts convolucionales, aquí no se aplica data
+    augmentation: solo redimensionado y normalización, ya que el MLP se
+    usa como línea base simple.
+
+    Args:
+        data_dir: Carpeta raíz del dataset, con subcarpetas
+            ``train/``, ``val/`` y ``test/`` (cada una con una subcarpeta
+            por clase).
+        patch_size: Lado (en píxeles) al que se redimensionan los parches.
+        batch_size: Tamaño de batch para los tres loaders.
+        num_workers: Número de procesos worker para la carga de datos.
+
+    Returns:
+        tuple: ``(train_set, val_set, test_set, train_loader, val_loader,
+        test_loader)``, donde los ``*_set`` son instancias de
+        ``torchvision.datasets.ImageFolder`` y los ``*_loader`` son
+        ``torch.utils.data.DataLoader``.
+    """
     tfm = transforms.Compose([
         transforms.Resize((patch_size, patch_size)),
         transforms.ToTensor(),
@@ -62,19 +123,57 @@ def make_loaders(data_dir, patch_size=32, batch_size=64, num_workers=2):
     return train_set, val_set, test_set, train_loader, val_loader, test_loader
 
 
-def compute_class_weights(dataset):
+def compute_class_weights(dataset, max_weight=10.0):
+    """Calcula pesos inversamente proporcionales a la frecuencia de cada clase.
+
+    Se usan como ``weight`` de ``nn.CrossEntropyLoss`` para compensar el
+    desbalance entre clases.
+
+    Args:
+        dataset: Dataset tipo ``ImageFolder`` (iterable de pares
+            ``(imagen, etiqueta_entera)``).
+        max_weight: Tope superior del peso de cualquier clase. Sin este
+            límite, una clase con muy pocos ejemplos (p.ej. 5 imágenes de
+            "Esponjas" frente a 20000+ de "Coral") recibe un peso cientos
+            de veces mayor al de las clases mayoritarias, lo que
+            desestabiliza el entrenamiento sin que el modelo pueda
+            realmente aprender esa clase con tan pocos datos.
+
+    Returns:
+        torch.Tensor: Tensor 1D de tipo ``float32`` con un peso por clase
+        (capado a ``max_weight``), en el mismo orden que ``dataset.classes``.
+    """
     ys = [y for _, y in dataset]
     counts = np.bincount(ys)
     counts = counts + 1e-6  # evitar división por cero
     weights = counts.sum() / (len(counts) * counts)
+    weights = np.clip(weights, a_min=None, a_max=max_weight)
     return torch.tensor(weights, dtype=torch.float32)
 
 
 def train_epoch(model, loader, criterion, optimizer, device):
+    """Entrena el modelo durante una época sobre ``loader``.
+
+    Cada batch de imágenes se aplana (``x.view(x.size(0), -1)``) antes de
+    pasarlo al MLP, ya que este espera vectores planos. Además del
+    accuracy, acumula todas las predicciones de la época para calcular
+    también el F1 macro (más robusto ante el desbalance de clases), como
+    en ``train_miniresnet_patches.py``.
+
+    Args:
+        model (nn.Module): Modelo :class:`MLP` a entrenar (modo ``train``).
+        loader (DataLoader): Loader del split de entrenamiento.
+        criterion: Función de pérdida (p.ej. ``nn.CrossEntropyLoss``).
+        optimizer: Optimizador de PyTorch ya asociado a los parámetros del modelo.
+        device: Dispositivo (``"cuda"`` o ``"cpu"``) donde mover los tensores.
+
+    Returns:
+        tuple[float, float, float]: ``(loss_promedio, accuracy, f1_macro)``
+        de la época.
+    """
     model.train()
     total_loss = 0.0
-    correct = 0
-    total = 0
+    all_y, all_p = [], []
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         x = x.view(x.size(0), -1)
@@ -85,32 +184,70 @@ def train_epoch(model, loader, criterion, optimizer, device):
         optimizer.step()
 
         total_loss += float(loss) * x.size(0)
-        pred = out.argmax(1)
-        correct += (pred == y).sum().item()
-        total += y.numel()
-    return total_loss / total, correct / total
+        preds = out.argmax(1)
+
+        all_y.append(y.cpu())
+        all_p.append(preds.cpu())
+
+    y_true = torch.cat(all_y).numpy()
+    y_pred = torch.cat(all_p).numpy()
+
+    acc = (y_true == y_pred).mean()
+    f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
+
+    return total_loss / len(y_true), acc, f1
 
 
 @torch.no_grad()
 def eval_epoch(model, loader, criterion, device):
+    """Evalúa el modelo (sin actualizar pesos) sobre ``loader``.
+
+    Args:
+        model (nn.Module): Modelo :class:`MLP` a evaluar (modo ``eval``).
+        loader (DataLoader): Loader del split a evaluar (val o test).
+        criterion: Función de pérdida usada solo para reportar el valor.
+        device: Dispositivo (``"cuda"`` o ``"cpu"``) donde mover los tensores.
+
+    Returns:
+        tuple[float, float, float]: ``(loss_promedio, accuracy, f1_macro)``
+        sobre todo el split.
+    """
     model.eval()
     total_loss = 0.0
-    correct = 0
-    total = 0
+    all_y, all_p = [], []
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         x = x.view(x.size(0), -1)
         out = model(x)
         loss = criterion(out, y)
         total_loss += float(loss) * x.size(0)
-        pred = out.argmax(1)
-        correct += (pred == y).sum().item()
-        total += y.numel()
-    return total_loss / total, correct / total
+        preds = out.argmax(1)
+
+        all_y.append(y.cpu())
+        all_p.append(preds.cpu())
+
+    y_true = torch.cat(all_y).numpy()
+    y_pred = torch.cat(all_p).numpy()
+
+    acc = (y_true == y_pred).mean()
+    f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
+
+    return total_loss / len(y_true), acc, f1
 
 
 @torch.no_grad()
 def predict_all(model, loader, device):
+    """Genera predicciones del modelo para todo un ``DataLoader``.
+
+    Args:
+        model (nn.Module): Modelo ya entrenado (se pone en modo ``eval``).
+        loader (DataLoader): Loader sobre el que predecir (típicamente test).
+        device: Dispositivo (``"cuda"`` o ``"cpu"``) donde mover los tensores.
+
+    Returns:
+        tuple[numpy.ndarray, numpy.ndarray]: ``(y_true, y_pred)``, arrays
+        1D con las etiquetas verdaderas y las predichas.
+    """
     model.eval()
     yy = []
     pp = []
@@ -125,6 +262,19 @@ def predict_all(model, loader, device):
 
 
 def main():
+    """Punto de entrada del script: entrena, evalúa y guarda resultados del MLP.
+
+    Lee los argumentos de línea de comandos, construye los loaders y el
+    modelo :class:`MLP`, ejecuta el loop de entrenamiento con early
+    stopping por ``val_acc``, y al terminar evalúa el mejor checkpoint
+    sobre el split de test, guardando métricas, reporte de clasificación,
+    matriz de confusión y las curvas de accuracy/F1 macro/loss en ``results/``.
+
+    No recibe argumentos ni devuelve nada directamente: toda la
+    configuración se lee de ``sys.argv`` mediante ``argparse`` (ver
+    ``python scripts/train_mlp_patches.py --help`` para la lista completa
+    de opciones).
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", required=True,
                     help="Carpeta raíz del dataset (ej: ./datasets/32x32)")
@@ -143,7 +293,7 @@ def main():
     print("Device:", device)
 
     # Carpeta de resultados
-    results_dir = Path("results")
+    results_dir = Path("results/results_mlp")
     results_dir.mkdir(parents=True, exist_ok=True)
     print(f"Guardando resultados en: {results_dir.resolve()}")
 
@@ -181,22 +331,22 @@ def main():
 
     # Loop de entrenamiento
     for epoch in range(1, args.epochs + 1):
-        tr_loss, tr_acc = train_epoch(model, train_loader, criterion, optimizer, device)
-        va_loss, va_acc = eval_epoch(model, val_loader, criterion, device)
-        te_loss, te_acc = eval_epoch(model, test_loader, criterion, device)
+        tr_loss, tr_acc, tr_f1 = train_epoch(model, train_loader, criterion, optimizer, device)
+        va_loss, va_acc, va_f1 = eval_epoch(model, val_loader, criterion, device)
+        te_loss, te_acc, te_f1 = eval_epoch(model, test_loader, criterion, device)
 
         history.append({
             "epoch": epoch,
-            "train_loss": tr_loss, "train_acc": tr_acc,
-            "val_loss":   va_loss, "val_acc":   va_acc,
-            "test_loss":  te_loss, "test_acc":  te_acc,
+            "train_loss": tr_loss, "train_acc": tr_acc, "train_f1": tr_f1,
+            "val_loss":   va_loss, "val_acc":   va_acc,   "val_f1":   va_f1,
+            "test_loss":  te_loss, "test_acc":  te_acc,  "test_f1":  te_f1,
         })
 
         print(
             f"[{epoch:03d}] "
-            f"train_loss={tr_loss:.4f} acc={tr_acc:.4f} | "
-            f"val_loss={va_loss:.4f} acc={va_acc:.4f} | "
-            f"test_loss={te_loss:.4f} acc={te_acc:.4f}"
+            f"train_loss={tr_loss:.4f} acc={tr_acc:.4f} f1={tr_f1:.4f} | "
+            f"val_loss={va_loss:.4f} acc={va_acc:.4f} f1={va_f1:.4f} | "
+            f"test_loss={te_loss:.4f} acc={te_acc:.4f} f1={te_f1:.4f}"
         )
 
         # Early stopping por val_acc
@@ -261,6 +411,19 @@ def main():
         plt.tight_layout()
         plt.savefig(results_dir / "curves_accuracy.png", dpi=150)
 
+        # F1 macro
+        plt.figure()
+        plt.plot(epochs, [h["train_f1"] for h in history], label="train_f1")
+        plt.plot(epochs, [h["val_f1"]   for h in history], label="val_f1")
+        plt.plot(epochs, [h["test_f1"]  for h in history], label="test_f1")
+        plt.xlabel("Epoch")
+        plt.ylabel("F1 macro")
+        plt.title("F1 macro por época (MLP)")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(results_dir / "curves_f1.png", dpi=150)
+
         # Loss
         plt.figure()
         plt.plot(epochs, tr_loss, label="train_loss")
@@ -287,7 +450,7 @@ def main():
         plt.tight_layout()
         plt.savefig(results_dir / "confusion_matrix.png", dpi=150)
 
-        print("Guardadas en results/: curves_accuracy.png, curves_loss.png y confusion_matrix.png")
+        print("Guardadas en results/: curves_accuracy.png, curves_f1.png, curves_loss.png y confusion_matrix.png")
     except Exception as e:
         print(f"[AVISO] No se pudieron generar las gráficas: {e}")
 
