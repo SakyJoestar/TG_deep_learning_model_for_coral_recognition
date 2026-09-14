@@ -1,0 +1,107 @@
+{
+  "meta": {
+    "descripcion": "Categorias bentonicas para clasificacion de comunidades coralinas - Pacifico colombiano",
+    "version": "v3",
+    "fuente": "Categorias_corales.docx + cobertura_codes_v2.txt",
+    "nota": "El campo 'aliases' contiene los codigos usados en la version anterior (v2) que ahora corresponden a este mismo codigo/categoria. Los colores se asignan por grupo, no por codigo individual (igual que en v2)."
+  },
+  "grupos": [
+    {
+      "grupo": "ALG",
+      "nombre_es": "Algas",
+      "color_hex": "80FF80",
+      "codigos": [
+        {"code": "EALG", "name_es": "Calcareas incrustantes", "name_en": "Encrusting calcareous algae", "description": "Coralline algae", "aliases": []},
+        {"code": "TALG", "name_es": "Tapetes (frondosa o filamentosa, <1cm)", "name_en": "Turf algae", "description": "Bushy algae (<1cm)", "aliases": []},
+        {"code": "FALG", "name_es": "Frondosas, macroalgas (>1 cm)", "name_en": "Fleshy algae", "description": "Macroalgae (>1 cm)", "aliases": []},
+        {"code": "CALG", "name_es": "Calcareas erectas", "name_en": "Erect crustose coralline algae", "description": "Coralline algae exhibiting upright, three-dimensional growth", "aliases": []}
+      ]
+    },
+    {
+      "grupo": "CORAL",
+      "nombre_es": "Coral",
+      "color_hex": "00FFFF",
+      "codigos": [
+        {"code": "PCLA", "name_es": "Pavona clavus", "name_en": "Pavona clavus", "description": "Massive coral", "aliases": []},
+        {"code": "PGIG", "name_es": "Pavona gigantea", "name_en": "Pavona gigantea", "description": "Massive coral", "aliases": []},
+        {"code": "PVAR", "name_es": "Pavona varians", "name_en": "Pavona varians", "description": "Encrusting coral", "aliases": []},
+        {"code": "PMAL", "name_es": "Pavona maldivensis", "name_en": "Pavona maldivensis", "description": "Massive or encrusting corals", "aliases": []},
+        {"code": "PFRO", "name_es": "Pavona frondifera", "name_en": "Pavona frondifera", "description": "Encrusting coral exhibiting foliaceous forms", "aliases": []},
+        {"code": "PCHI", "name_es": "Pavona chiriquiensis", "name_en": "Pavona chiriquiensis", "description": "Encrusting coral", "aliases": []},
+        {"code": "GPLA", "name_es": "Gardineroseris planulata", "name_en": "Gardineroseris planulata", "description": "Massive coral", "aliases": []},
+        {"code": "PRSP", "name_es": "Porites spp.", "name_en": "Porites spp.", "description": "Encrusting coral", "aliases": ["PORSP"]},
+        {"code": "PCSP", "name_es": "Pocillopora spp.", "name_en": "Pocillopora spp.", "description": "Branched coral", "aliases": ["POCSP"]},
+        {"code": "PGRA", "name_es": "Pocillopora grandis", "name_en": "Pocillopora grandis", "description": "Branched coral", "aliases": []},
+        {"code": "PSTE", "name_es": "Psammocora stellata", "name_en": "Psammocora stellata", "description": "Submassive coral", "aliases": []},
+        {"code": "NCOR", "name_es": "Coral no identificado", "name_en": "Unidentified coral", "description": "Any coral species not included in the above scleractinian coral categories, or any coral whose species identity could not be confirmed", "aliases": []}
+      ]
+    },
+    {
+      "grupo": "CORBLAN",
+      "nombre_es": "Corales blandos",
+      "color_hex": "FF80FF",
+      "codigos": [
+        {"code": "GORG", "name_es": "Gorgonaceos", "name_en": "Gorgonians", "description": "Erect and encrusting gorgonians are included", "aliases": ["ENGR"]},
+        {"code": "CMOR", "name_es": "Coralimorfarios", "name_en": "Corallimorpharia", "description": "-", "aliases": []},
+        {"code": "ZOAN", "name_es": "Zoantidios", "name_en": "Zoanthids", "description": "-", "aliases": []},
+        {"code": "ANEM", "name_es": "Anemonas", "name_en": "Sea anemones", "description": "-", "aliases": []}
+      ]
+    },
+    {
+      "grupo": "SPON",
+      "nombre_es": "Esponjas",
+      "color_hex": "FF8000",
+      "codigos": [
+        {"code": "ERSP", "name_es": "Erectas", "name_en": "Erect sponges", "description": "-", "aliases": []},
+        {"code": "ENSP", "name_es": "Incrustantes", "name_en": "Encrusting sponges", "description": "-", "aliases": []}
+      ]
+    },
+    {
+      "grupo": "OTROS",
+      "nombre_es": "Otros organismos",
+      "color_hex": "8000FF",
+      "codigos": [
+        {"code": "PEZ", "name_es": "Peces", "name_en": "Fish", "description": "-", "aliases": []},
+        {"code": "OTIN", "name_es": "Otros invertebrados", "name_en": "Other invertebrates", "description": "Ascidians, polychaeta, bryozoa, foraminifera", "aliases": ["OTROS"]}
+      ]
+    },
+    {
+      "grupo": "SINERTE",
+      "nombre_es": "Sustrato inerte",
+      "color_hex": "804000",
+      "codigos": [
+        {"code": "ROCK", "name_es": "Roca", "name_en": "Rock", "description": "Reef pavement", "aliases": []},
+        {"code": "BOUL", "name_es": "Cantos grandes", "name_en": "Boulders", "description": ">25.6 cm", "aliases": []},
+        {"code": "COBB", "name_es": "Cantos medianos", "name_en": "Cobbles", "description": "6.4-25.6 cm", "aliases": []},
+        {"code": "PEBB", "name_es": "Guijarros", "name_en": "Pebbles", "description": "0.4-6.4 cm", "aliases": []},
+        {"code": "SAND", "name_es": "Sedimento libre", "name_en": "Free particles", "description": "Fine grains, smaller than pebbles", "aliases": []},
+        {"code": "RUBB", "name_es": "Cascajos (rubble), escombros", "name_en": "Rubble", "description": "Non-living coral fragments, either recently dead or covered by algae", "aliases": []},
+        {"code": "DORG", "name_es": "Materia organica", "name_en": "Organic debris", "description": "Dead organic matter, e.g., leaf litter", "aliases": []}
+      ]
+    },
+    {
+      "grupo": "NI",
+      "nombre_es": "No identificado",
+      "color_hex": "408080",
+      "codigos": [
+        {"code": "NI", "name_es": "No identificado", "name_en": "Unidentified substrate", "description": "Gaps and any features not specified in the above categories are assigned to this category. It also includes points with poor image quality (e.g., blurry, overexposed, or underexposed) where identification is not possible", "aliases": ["NA", "GAPS"]}
+      ]
+    },
+    {
+      "grupo": "TAPE",
+      "nombre_es": "Tape",
+      "color_hex": "DFDFDF",
+      "codigos": [
+        {"code": "TAPE", "name_es": "Tape", "name_en": "Tape", "description": "Equipment and items used during surveys are included", "aliases": []}
+      ]
+    }
+  ],
+  "notas": [
+    {"code": "FLUO", "name_es": "Fluorescencia", "name_en": "Fluorescent bleaching", "description": "Corals exhibiting pink pigmentation due to fluorescent protein activity", "aliases": []},
+    {"code": "DCOR", "name_es": "Coral recien muerto", "name_en": "Recently dead coral", "description": "Corals lacking algae or polyps", "aliases": []},
+    {"code": "SICK", "name_es": "Coral enfermo", "name_en": "Sick coral", "description": "Corals exhibiting symptoms of disease (e.g., black band disease or white band disease)", "aliases": ["ENFER"]},
+    {"code": "BLAN", "name_es": "Coral blanqueado", "name_en": "Bleached coral", "description": "Corals exhibiting a white appearance due to the loss of zooxanthellae. In branching corals, white tips must extend more than 2 cm down to be classified as bleaching", "aliases": ["BLANQ"]},
+    {"code": "SANO", "name_es": "Coral sano", "name_en": "Healthy coral", "description": "Corals not exhibiting signs of disease or bleaching. This includes corals with a pale appearance that are not classified as bleached", "aliases": []},
+    {"code": "OTRO", "name_es": "Otro", "name_en": "Other", "description": "Any features not specified in the above categories", "aliases": []}
+  ]
+}
