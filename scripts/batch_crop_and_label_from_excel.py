@@ -12,7 +12,8 @@ punto y los guarda en una estructura tipo ``ImageFolder``
 Si no se indica ``--label_col``, la etiqueta se construye de forma
 compuesta (categoría mayor + subcategoría + estado de salud del coral)
 usando el archivo de códigos de cobertura (``--codes_file``, por defecto
-``cobertura_codes_v2.txt``).
+``cobertura_codes_v3.json``; también acepta el formato ``.txt`` tipo CSV
+de ``cobertura_codes_v2.txt`` para compatibilidad hacia atrás).
 
 Requisitos:
     pip install pandas pillow openpyxl
@@ -23,7 +24,7 @@ Uso típico:
         --out_dir ./datasets --patch_size 32
 """
 
-import os, argparse, csv, random, re, unicodedata
+import os, argparse, csv, json, random, re, unicodedata
 from pathlib import Path
 import pandas as pd
 from PIL import Image
@@ -31,7 +32,14 @@ from PIL import Image
 IMG_EXTS = (".jpg",".jpeg",".png",".tif",".tiff",".bmp")
 XLS_EXTS = (".xlsx",".xls")
 CSV_EXTS = (".csv",)
-DEFAULT_CORAL_STATES = {"DCOR", "OTRO", "ENFER", "BLANQ", "SANO"}
+DEFAULT_CORAL_STATES = {"DCOR", "OTRO", "ENFER", "BLANQ", "SANO", "FLUO"}
+# BOUL/COBB/PEBB (cantos grandes/medianos/guijarros) son la misma naturaleza de
+# sustrato (roca suelta / clastos) diferenciada solo por un umbral de tamaño
+# que no se puede medir de forma confiable en un parche sin escala de
+# referencia, así que se fusionan en una sola clase ("CLASTOS") al momento de
+# recortar. cobertura_codes_v3.json conserva las 3 clases por separado como
+# referencia del esquema de cobertura original.
+SUBCATEGORY_MERGE = {"BOUL": "CLASTOS", "COBB": "CLASTOS", "PEBB": "CLASTOS"}
 
 def clean_cell(v):
     """Convierte una celda de DataFrame a texto limpio.
@@ -99,18 +107,26 @@ def is_hex_color(v):
     """
     return bool(re.fullmatch(r"[0-9A-Fa-f]{6}", clean_cell(v)))
 
+def _empty_codes():
+    """Estructura vacía de códigos (con los estados de coral por defecto)."""
+    return {
+        "major_by_code": {},
+        "major_code_by_name": {},
+        "subcategory_by_code": {},
+        "parent_by_subcategory": {},
+        "state_by_code": {},
+        "state_codes": set(DEFAULT_CORAL_STATES),
+    }
+
 def load_coverage_codes(path, debug=False):
-    """Carga el diccionario de códigos de cobertura bentónica desde un archivo tipo CSV.
+    """Carga el diccionario de códigos de cobertura bentónica.
 
-    El archivo (p.ej. ``cobertura_codes_v2.txt``) tiene tres columnas por
-    fila: ``codigo, nombre, tercera_columna``. La tercera columna decide el
-    tipo de fila:
+    Acepta dos formatos, detectados por la extensión de ``path``:
 
-    - Si es un color hexadecimal -> es una "categoría mayor" (p.ej. CORAL, ALG).
-    - Si no lo es -> es una "subcategoría", y la tercera columna indica su
-      categoría mayor "padre".
-    - Tras una fila cuyo código es ``NOTES``, las filas siguientes se
-      interpretan como "estados" del coral (p.ej. sano, enfermo, blanqueado).
+    - ``.json`` (p.ej. ``cobertura_codes_v3.json``, formato actual): ver
+      :func:`_load_coverage_codes_json`.
+    - Cualquier otra extensión (p.ej. ``cobertura_codes_v2.txt``, formato
+      legado tipo CSV): ver :func:`_load_coverage_codes_csv`.
 
     Args:
         path: Ruta al archivo de códigos. Si es falsy o no existe, se
@@ -130,23 +146,52 @@ def load_coverage_codes(path, debug=False):
         - ``state_by_code``: código de estado -> nombre del estado.
         - ``state_codes``: conjunto de códigos de estado del coral.
     """
-    codes = {
-        "major_by_code": {},
-        "major_code_by_name": {},
-        "subcategory_by_code": {},
-        "parent_by_subcategory": {},
-        "state_by_code": {},
-        "state_codes": set(DEFAULT_CORAL_STATES),
-    }
     if not path:
-        return codes
+        return _empty_codes()
 
     path = Path(path)
     if not path.exists():
         if debug:
             print(f"[AVISO] No encontré archivo de códigos: {path}")
-        return codes
+        return _empty_codes()
 
+    if path.suffix.lower() == ".json":
+        codes = _load_coverage_codes_json(path)
+    else:
+        codes = _load_coverage_codes_csv(path)
+
+    codes["subcategory_by_code"].setdefault("CLASTOS", "Clastos")
+    codes["parent_by_subcategory"].setdefault("CLASTOS", "SINERTE")
+
+    if debug:
+        print(
+            "[DEBUG] códigos cargados: "
+            f"mayores={len(codes['major_by_code'])}, "
+            f"subcategorías={len(codes['subcategory_by_code'])}, "
+            f"estados={sorted(codes['state_codes'])}"
+        )
+    return codes
+
+def _load_coverage_codes_csv(path):
+    """Parsea el formato legado tipo CSV (v2, p.ej. ``cobertura_codes_v2.txt``).
+
+    El archivo tiene tres columnas por fila: ``codigo, nombre,
+    tercera_columna``. La tercera columna decide el tipo de fila:
+
+    - Si es un color hexadecimal -> es una "categoría mayor" (p.ej. CORAL, ALG).
+    - Si no lo es -> es una "subcategoría", y la tercera columna indica su
+      categoría mayor "padre".
+    - Tras una fila cuyo código es ``NOTES``, las filas siguientes se
+      interpretan como "estados" del coral (p.ej. sano, enfermo, blanqueado).
+
+    Args:
+        path: Ruta al archivo ``.txt``/``.csv`` de códigos (ya verificado
+            que existe).
+
+    Returns:
+        dict: Mismo formato que :func:`load_coverage_codes`.
+    """
+    codes = _empty_codes()
     in_notes = False
     with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as fh:
         for row in csv.reader(fh, skipinitialspace=True):
@@ -180,13 +225,82 @@ def load_coverage_codes(path, debug=False):
         codes["major_code_by_name"][normalize_lookup_key(code)] = code
         codes["major_code_by_name"][normalize_lookup_key(name)] = code
 
-    if debug:
-        print(
-            "[DEBUG] códigos cargados: "
-            f"mayores={len(codes['major_by_code'])}, "
-            f"subcategorías={len(codes['subcategory_by_code'])}, "
-            f"estados={sorted(codes['state_codes'])}"
-        )
+    return codes
+
+def _load_coverage_codes_json(path):
+    """Parsea el formato actual (v3, p.ej. ``cobertura_codes_v3.json``).
+
+    Estructura esperada (ver ``cobertura_codes_v3.json``)::
+
+        {
+          "grupos": [
+            {"grupo": "CORAL", "nombre_es": "Coral", "color_hex": "...",
+             "codigos": [
+               {"code": "PGRA", "name_es": "Pocillopora grandis",
+                "aliases": ["PGRA_VIEJO", ...]},
+               ...
+             ]},
+            ...
+          ],
+          "notas": [
+            {"code": "SANO", "name_es": "Coral sano", "aliases": [...]},
+            ...
+          ]
+        }
+
+    Cada código (de grupo o de nota) puede declarar ``aliases``: códigos
+    usados en versiones anteriores del esquema que ahora se consideran el
+    mismo código, para que datos ya etiquetados con el código viejo sigan
+    resolviendo a la categoría correcta sin tener que re-etiquetar nada.
+
+    Un ``codigo`` cuyo ``code`` coincide con el de su propio grupo (p.ej.
+    ``NI``/``NI`` o ``TAPE``/``TAPE`` - grupos sin subcategorías reales)
+    también registra sus alias como alias de la categoría mayor, para que
+    resuelvan igual si aparecen en la columna "Major Category" o en
+    "Subcategory" (p.ej. el "NA" viejo, que en v2 era a la vez categoría
+    mayor y subcategoría de sí misma).
+
+    Args:
+        path: Ruta al archivo ``.json`` de códigos (ya verificado que existe).
+
+    Returns:
+        dict: Mismo formato que :func:`load_coverage_codes`.
+    """
+    codes = _empty_codes()
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+
+    for grupo in data.get("grupos", []):
+        grupo_code = slugify_label(grupo["grupo"])
+        grupo_name = clean_cell(grupo.get("nombre_es", grupo["grupo"]))
+        codes["major_by_code"][grupo_code] = grupo_name
+        codes["major_code_by_name"][normalize_lookup_key(grupo_code)] = grupo_code
+        codes["major_code_by_name"][normalize_lookup_key(grupo_name)] = grupo_code
+
+        for entry in grupo.get("codigos", []):
+            sub_code = slugify_label(entry["code"])
+            sub_name = clean_cell(entry.get("name_es", entry["code"]))
+            codes["subcategory_by_code"][sub_code] = sub_name
+            codes["parent_by_subcategory"][sub_code] = grupo_code
+
+            for alias in entry.get("aliases", []):
+                alias_code = slugify_label(alias)
+                codes["subcategory_by_code"].setdefault(alias_code, sub_name)
+                codes["parent_by_subcategory"].setdefault(alias_code, grupo_code)
+                if sub_code == grupo_code:
+                    codes["major_code_by_name"].setdefault(
+                        normalize_lookup_key(alias_code), grupo_code
+                    )
+
+    for nota in data.get("notas", []):
+        state_code = slugify_label(nota["code"])
+        state_name = clean_cell(nota.get("name_es", nota["code"]))
+        codes["state_by_code"][state_code] = state_name
+        codes["state_codes"].add(state_code)
+        for alias in nota.get("aliases", []):
+            alias_code = slugify_label(alias)
+            codes["state_by_code"].setdefault(alias_code, state_name)
+            codes["state_codes"].add(alias_code)
+
     return codes
 
 def find_col(cols, candidates):
@@ -290,6 +404,7 @@ def build_composite_label(row, codes, label_mode="full", sep="/"):
         sub_code = slugify_label(id_code_raw)
     if not sub_code and id_name_raw:
         sub_code = slugify_label(id_name_raw)
+    sub_code = SUBCATEGORY_MERGE.get(sub_code, sub_code)
 
     condition_code = slugify_label(notes_raw) if notes_raw else ""
     is_condition = condition_code in codes["state_codes"]
@@ -561,7 +676,7 @@ def main():
     ap.add_argument("--label_mode", choices=["major", "subcategory", "full"], default="full",
                     help="major=solo categoría mayor; subcategory=solo subcategoría; full=mayor+subcategoría+estado coral")
     ap.add_argument("--label_sep", default="/", help="Separador para etiquetas compuestas (usa '/' para crear subcarpetas categoria/subcategoria)")
-    ap.add_argument("--codes_file", default="cobertura_codes_v2.txt", help="Archivo con códigos de cobertura")
+    ap.add_argument("--codes_file", default="cobertura_codes_v3.json", help="Archivo con códigos de cobertura (.json v3 o .txt v2)")
     ap.add_argument("--patch_size", type=int, default=40)
     ap.add_argument("--pad_edge", type=str, default="true")
     ap.add_argument("--scale_x", type=float, default=1.0)

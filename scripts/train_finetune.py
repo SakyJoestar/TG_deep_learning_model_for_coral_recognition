@@ -35,6 +35,21 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from patch_dataset import make_hierarchical_loaders, hierarchical_breakdown, category_rollup
+
+
+def get_device():
+    """Elige cuda > DirectML (GPU AMD/Intel en Windows) > cpu."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    try:
+        import torch_directml
+        if torch_directml.is_available():
+            return torch_directml.device()
+    except ImportError:
+        pass
+    return torch.device("cpu")
+
 
 # ---------------------- CARGAR MODELO ----------------------
 
@@ -85,8 +100,35 @@ def load_pretrained_model(name, num_classes):
 
 # ---------------------- DATA LOADERS ----------------------
 
-def make_loaders(data_dir, img_size=224, batch_size=32, num_workers=2):
-    """Crea los ``DataLoader`` de train/val/test a partir de una estructura ``ImageFolder``.
+class _ClassLockedImageFolder(datasets.ImageFolder):
+    """``ImageFolder`` cuyo mapeo clase->índice es fijo (pasado
+    explícitamente), en vez de auto-descubrirse a partir de las subcarpetas
+    presentes en ``root``.
+
+    Necesario porque no todas las clases tienen ejemplos en todos los
+    splits (p.ej. una clase rara puede no tener ninguna imagen en test):
+    si cada split auto-descubre su propio ``class_to_idx``, dos splits con
+    distinto conjunto de clases presentes terminan con índices desalineados
+    entre sí, y las métricas y la matriz de confusión de ese split quedan
+    silenciosamente mal etiquetadas aunque el entrenamiento no falle.
+
+    Definida a nivel de módulo (no como clase anidada) porque
+    ``DataLoader(num_workers>0)`` en Windows usa ``spawn`` y necesita poder
+    hacer pickle del dataset para mandarlo a los procesos worker; una clase
+    anidada dentro de una función no es picklable.
+    """
+
+    def __init__(self, root, class_to_idx, transform=None):
+        self._fixed_class_to_idx = dict(class_to_idx)
+        super().__init__(root, transform=transform, allow_empty=True)
+
+    def find_classes(self, directory):
+        return list(self._fixed_class_to_idx.keys()), dict(self._fixed_class_to_idx)
+
+
+def make_loaders(data_dir, img_size=224, batch_size=32, num_workers=2,
+                  task="major", min_class_count=0, debug=False):
+    """Crea los ``DataLoader`` de train/val/test.
 
     Las imágenes se escalan a ``img_size x img_size`` (224x224 por
     defecto) y se normalizan con las estadísticas de ImageNet, porque los
@@ -100,12 +142,16 @@ def make_loaders(data_dir, img_size=224, batch_size=32, num_workers=2):
         img_size: Lado (en píxeles) al que se redimensionan las imágenes.
         batch_size: Tamaño de batch para los tres loaders.
         num_workers: Número de procesos worker para la carga de datos.
+        task: ``"major"`` (por defecto, aprendizaje jerárquico "apagado")
+            clasifica por categoría mayor con ``ImageFolder`` normal.
+            ``"species"``/``"condition"`` usan ``patch_dataset.py``.
+        min_class_count: Solo para ``task in {"species","condition"}``:
+            excluye clases con menos de este total de parches.
+        debug: Si es ``True``, imprime detalle de clases excluidas.
 
     Returns:
         tuple: ``(train_set, val_set, test_set, train_loader, val_loader,
-        test_loader)``, donde los ``*_set`` son instancias de
-        ``torchvision.datasets.ImageFolder`` y los ``*_loader`` son
-        ``torch.utils.data.DataLoader``.
+        test_loader, dropped)``.
     """
 
     train_tfm = transforms.Compose([
@@ -124,9 +170,21 @@ def make_loaders(data_dir, img_size=224, batch_size=32, num_workers=2):
                              std=[0.229, 0.224, 0.225]),
     ])
 
+    if task != "major":
+        return make_hierarchical_loaders(
+            data_dir, stage=task, train_tfm=train_tfm, eval_tfm=eval_tfm,
+            min_class_count=min_class_count, batch_size=batch_size,
+            num_workers=num_workers, debug=debug,
+        )
+
     train_set = datasets.ImageFolder(os.path.join(data_dir, "train"), transform=train_tfm)
-    val_set   = datasets.ImageFolder(os.path.join(data_dir, "val"),   transform=eval_tfm)
-    test_set  = datasets.ImageFolder(os.path.join(data_dir, "test"),  transform=eval_tfm)
+    # val/test heredan el mapeo clase->índice de train en vez de descubrir
+    # el suyo propio: si una clase no tiene ejemplos en ese split (p.ej.
+    # "Esponjas" puede no aparecer en test), dejar que cada split
+    # auto-descubra sus clases produce un class_to_idx distinto por split
+    # y desalinea silenciosamente las etiquetas entre train y val/test.
+    val_set   = _ClassLockedImageFolder(os.path.join(data_dir, "val"),  train_set.class_to_idx, transform=eval_tfm)
+    test_set  = _ClassLockedImageFolder(os.path.join(data_dir, "test"), train_set.class_to_idx, transform=eval_tfm)
 
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
                               num_workers=num_workers, pin_memory=True)
@@ -135,7 +193,7 @@ def make_loaders(data_dir, img_size=224, batch_size=32, num_workers=2):
     test_loader  = DataLoader(test_set,  batch_size=batch_size, shuffle=False,
                               num_workers=num_workers, pin_memory=True)
 
-    return train_set, val_set, test_set, train_loader, val_loader, test_loader
+    return train_set, val_set, test_set, train_loader, val_loader, test_loader, []
 
 
 def compute_class_weights(dataset, max_weight=10.0):
@@ -278,6 +336,69 @@ def predict_all(model, loader, device):
     return np.array(yy), np.array(pp)
 
 
+def subcategory_breakdown(dataset, y_true, y_pred, class_names):
+    """Desglosa el acierto de test por subcategoría real, aunque el modelo
+    clasifique por categoría mayor.
+
+    El dataset guarda cada parche en ``<major>/<subcategoria>/archivo.jpg``
+    (o solo ``<major>/archivo.jpg`` si esa categoría mayor no tiene
+    subcategoría propia, p.ej. TAPE). El modelo solo predice la categoría
+    mayor (ver nota en :func:`make_loaders`), así que esto no mide una
+    predicción de subcategoría - mide, dentro de cada subcategoría real
+    (p.ej. "Psammocora stellata"), qué tan seguido el modelo acertó la
+    categoría mayor a la que pertenece. Sirve para detectar que el modelo
+    le va mal específicamente a una especie/subcategoría aunque en
+    promedio le vaya bien a su categoría mayor.
+
+    Args:
+        dataset: ``ImageFolder`` (o :class:`_ClassLockedImageFolder`) del
+            split de test, con ``.samples`` en el mismo orden que
+            ``y_true``/``y_pred`` (requiere ``shuffle=False`` en el loader).
+        y_true: Índices de categoría mayor verdaderos (de :func:`predict_all`).
+        y_pred: Índices de categoría mayor predichos (de :func:`predict_all`).
+        class_names: Nombres de categoría mayor en orden de índice
+            (``train_set.classes``).
+
+    Returns:
+        pandas.DataFrame: columnas ``major_category``, ``subcategory``,
+        ``n``, ``correct``, ``accuracy``. Por cada categoría mayor hay una
+        fila con ``subcategory="TOTAL"`` (el mismo agregado que aparece en
+        ``test_report.txt``, para que este CSV sea autocontenido), seguida
+        de sus subcategorías ordenadas por accuracy ascendente (las más
+        problemáticas primero).
+    """
+    root = Path(dataset.root)
+    rows = []
+    for (filepath, _), yt, yp in zip(dataset.samples, y_true, y_pred):
+        rel_parts = Path(filepath).relative_to(root).parts[:-1]  # sin el archivo
+        subcat = rel_parts[1] if len(rel_parts) >= 2 else rel_parts[0]
+        rows.append({
+            "major_category": class_names[yt],
+            "subcategory": subcat,
+            "correct": int(yt == yp),
+        })
+    df = pd.DataFrame(rows)
+
+    by_sub = df.groupby(["major_category", "subcategory"]).agg(
+        n=("correct", "size"), correct=("correct", "sum")
+    ).reset_index()
+
+    totals = df.groupby("major_category").agg(
+        n=("correct", "size"), correct=("correct", "sum")
+    ).reset_index()
+    totals["subcategory"] = "TOTAL"
+
+    summary = pd.concat([totals, by_sub], ignore_index=True)
+    summary["accuracy"] = summary["correct"] / summary["n"]
+    # TOTAL primero dentro de cada categoría mayor, luego subcategorías por
+    # accuracy ascendente (is_total=False ordena después de True al ascender).
+    summary["is_total"] = summary["subcategory"] == "TOTAL"
+    summary = summary.sort_values(
+        ["major_category", "is_total", "accuracy"], ascending=[True, False, True]
+    ).drop(columns="is_total").reset_index(drop=True)
+    return summary[["major_category", "subcategory", "n", "correct", "accuracy"]]
+
+
 # ---------------------- MAIN ----------------------
 
 def main():
@@ -321,13 +442,22 @@ def main():
     ap.add_argument("--freeze_level", type=int, default=2,
                 help="0 = sin congelar (todo entrenable), 1 = solo última capa, "
                      "2 = últimas capas del backbone, 3 = mitad de la red")
+    ap.add_argument("--task", choices=["major", "species", "condition"], default="major",
+                    help="'major' (por defecto) = comportamiento de siempre. 'species'/"
+                         "'condition' encienden el aprendizaje jerárquico (especie o "
+                         "condición de salud del coral). Ver patch_dataset.py.")
+    ap.add_argument("--min_class_count", type=int, default=50,
+                    help="Solo para --task species/condition: excluye clases con menos de "
+                         "este total de parches. Ver DECISIONES.md.")
     args = ap.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = get_device()
     print("Device:", device)
 
-    train_set, val_set, test_set, train_loader, val_loader, test_loader = \
-        make_loaders(args.data_dir, batch_size=args.batch_size, num_workers=args.num_workers)
+    train_set, val_set, test_set, train_loader, val_loader, test_loader, dropped = make_loaders(
+        args.data_dir, batch_size=args.batch_size, num_workers=args.num_workers,
+        task=args.task, min_class_count=args.min_class_count, debug=True,
+    )
 
     num_classes = len(train_set.classes)
 
@@ -445,7 +575,7 @@ def main():
     # optimizer = optim.AdamW(model.parameters(), lr=args.lr)
 
     # Carpeta de resultados
-    result_path = Path(args.results_dir) / args.model
+    result_path = Path(args.results_dir) / args.model / args.task
     result_path.mkdir(parents=True, exist_ok=True)
 
     # Guardar mapa de clases
@@ -453,8 +583,14 @@ def main():
         json.dump({i: c for i, c in enumerate(train_set.classes)},
                   f, ensure_ascii=False, indent=2)
 
+    if dropped:
+        with open(result_path / "excluded_classes.txt", "w", encoding="utf-8") as f:
+            f.write(f"task={args.task} min_class_count={args.min_class_count}\n")
+            for c, n in dropped:
+                f.write(f"{c}\t{n}\n")
+
     history = []
-    best_val_acc = -1
+    best_val_f1 = -1
     best_state = None
     patience = args.patience
 
@@ -475,9 +611,10 @@ def main():
               f"val_acc={va_acc:.3f} f1={va_f1:.3f} | "
               f"test_acc={te_acc:.3f} f1={te_f1:.3f}")
 
-        # Early stopping por val_acc
-        if va_acc > best_val_acc:
-            best_val_acc = va_acc
+        # Early stopping por val_f1 (macro): val_acc favorece a las clases
+        # mayoritarias (ALGAS/CORAL) e ignora a las minoritarias.
+        if va_f1 > best_val_f1:
+            best_val_f1 = va_f1
             # .cpu() crea una copia real; sin esto, best_state queda como
             # referencia a los tensores del modelo y termina reflejando la
             # última época (no la mejor) porque el optimizador los sigue
@@ -492,7 +629,7 @@ def main():
 
     # Guardar mejor modelo
     torch.save(best_state, result_path / "best_model.pt")
-    print(f"Guardado {result_path / 'best_model.pt'} (val_acc={best_val_acc:.4f})")
+    print(f"Guardado {result_path / 'best_model.pt'} (val_f1={best_val_f1:.4f})")
 
     # Guardar métricas
     df = pd.DataFrame(history)
@@ -517,6 +654,27 @@ def main():
     print(rep)
     print("Confusion matrix:")
     print(cm)
+
+    # Desglose por eje secundario (subcategoría real en task="major";
+    # condición/especie real en task="species"/"condition").
+    if args.task == "major":
+        sub_df = subcategory_breakdown(test_set, y_true, y_pred, train_set.classes)
+    else:
+        sub_df = hierarchical_breakdown(test_set, y_true, y_pred, train_set.classes)
+    sub_df.to_csv(result_path / "test_report_by_subcategory.csv", index=False)
+    sub_report_txt = sub_df.to_string(index=False)
+    with open(result_path / "test_report_by_subcategory.txt", "w", encoding="utf-8") as f:
+        f.write(sub_report_txt + "\n")
+    print("\n=== Desglose por subcategoría (test) ===")
+    print(sub_report_txt)
+
+    # Resultado total por categoría mayor (solo tiene sentido en task="species":
+    # promedio de la accuracy de sus subcategorías/especies, ver category_rollup).
+    if args.task == "species":
+        rollup_df = category_rollup(y_true, y_pred, train_set.classes)
+        rollup_df.to_csv(result_path / "test_report_by_category.csv", index=False)
+        print("\n=== Resultado total por categoría (promedio de sus subcategorías) ===")
+        print(rollup_df.to_string(index=False))
 
     # --- GRÁFICAS: accuracy y loss por época (train/val/test) + matriz de confusión ---
     try:

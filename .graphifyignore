@@ -18,6 +18,11 @@ Compartir_corales.zip
 # --- Salida del propio graphify (evita que se indexe a sí mismo) ---
 graphify-out/
 
+# --- Entornos virtuales (por si algún día no está bien excluido en .gitignore) ---
+.venv/
+.venv-*/
+venv/
+
 # --- Checkpoints sueltos fuera de las carpetas de resultados ---
 *.ckpt
 checkpoints/
