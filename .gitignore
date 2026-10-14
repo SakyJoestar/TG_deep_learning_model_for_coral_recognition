@@ -71,3 +71,5 @@ logs/
 # API keys sueltas en caso de que las guardes en archivo aparte
 **/api_key*
 **/*_key.txt
+# Informes técnicos generados para la redacción de la tesis (se mantienen locales)
+INFORME_*.md
